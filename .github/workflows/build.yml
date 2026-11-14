@@ -1,4 +1,4 @@
-name: Build Minoza Blocks APK 0.3.0
+name: Build MINOZA BLOCKS APK 0.4.0
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - main
       - master
     paths:
-      - 'Minoza-Blocks-Android-v0.3.0.zip'
+      - 'Minoza-Blocks-Android-v0.4.0.zip'
       - '.github/workflows/build.yml'
 
 permissions:
@@ -15,25 +15,33 @@ permissions:
 
 jobs:
   build:
+    name: Test and build Android APK 0.4.0
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
-      - name: Checkout source
+      - name: Checkout source archive
         uses: actions/checkout@v4
 
-      - name: Verify and extract project
+      - name: Extract and verify project
+        id: project
         shell: bash
         run: |
           set -euo pipefail
-          ARCHIVE="Minoza-Blocks-Android-v0.3.0.zip"
+          ARCHIVE="Minoza-Blocks-Android-v0.4.0.zip"
           test -s "$ARCHIVE"
           unzip -tq "$ARCHIVE"
-          unzip -oq "$ARCHIVE" -d .
-          test -s app/build.gradle
-          test -s app/src/main/java/com/minoza/game/GameView.java
-          grep -Fq "versionName '0.3.0'" app/build.gradle
-          echo "MINOZA BLOCKS source 0.3.0 verified."
+          PROJECT_DIR="$RUNNER_TEMP/minoza-source"
+          mkdir -p "$PROJECT_DIR"
+          unzip -oq "$ARCHIVE" -d "$PROJECT_DIR"
+          test -s "$PROJECT_DIR/settings.gradle"
+          test -s "$PROJECT_DIR/app/build.gradle"
+          test -s "$PROJECT_DIR/app/src/main/java/com/minoza/game/GameEngine.java"
+          test -s "$PROJECT_DIR/app/src/main/java/com/minoza/game/GameView.java"
+          test -s "$PROJECT_DIR/app/src/test/java/com/minoza/game/GameEngineTest.java"
+          grep -Fq "versionName '0.4.0'" "$PROJECT_DIR/app/build.gradle"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "MINOZA BLOCKS 0.4.0 source archive verified."
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -45,7 +53,9 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
+          set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
 
@@ -54,20 +64,33 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Build APK
-        run: gradle --no-daemon --stacktrace --console=plain :app:assembleDebug
-
-      - name: Verify APK
+      - name: Run unit tests and build debug APK
+        env:
+          PROJECT_DIR: ${{ steps.project.outputs.project_dir }}
         shell: bash
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          gradle --no-daemon --stacktrace --console=plain -p "$PROJECT_DIR" \
+            :app:testDebugUnitTest \
+            :app:assembleDebug
+
+      - name: Verify APK
+        env:
+          PROJECT_DIR: ${{ steps.project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
           echo "APK size: $(stat -c%s "$APK") bytes"
+          mkdir -p apk-output
+          cp "$APK" apk-output/Minoza-Blocks-0.4.0-debug.apk
 
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Minoza-Blocks-APK-0.3.0
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: MINOZA-BLOCKS-0.4.0-APK
+          path: apk-output/Minoza-Blocks-0.4.0-debug.apk
           if-no-files-found: error
+          retention-days: 14
+          
